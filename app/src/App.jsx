@@ -799,7 +799,7 @@ function App() {
 
     alert("Push subscription created");
 
-    const response = await fetch("/api/save-subscription", {
+    const response = await fetch(`${window.location.origin}/api/save-subscription`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
