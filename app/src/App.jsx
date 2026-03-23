@@ -7,8 +7,10 @@ import {
   Sparkles,
   Star,
   Search,
+  Home,
+  BookOpen,
+  Bookmark,
 } from "lucide-react";
-
 import { supabase } from "./supabase";
 
 const USE_SUPABASE = true;
@@ -383,9 +385,7 @@ function scoreQuote(quote, preferences, reactions, history) {
   score -= (reactions.dislikesByAuthor?.[quote.author] || 0) * 2.5;
 
   const last10 = history.slice(-10);
-  if (last10.includes(quote.id)) {
-    score -= 25;
-  }
+  if (last10.includes(quote.id)) score -= 25;
 
   return score;
 }
@@ -420,9 +420,7 @@ function pickDailyQuote(
     );
   }
 
-  if (!pool.length) {
-    return quotes[0];
-  }
+  if (!pool.length) return quotes[0];
 
   const scored = pool.map((quote) => ({
     ...quote,
@@ -433,9 +431,7 @@ function pickDailyQuote(
     if (b.adaptiveScore !== a.adaptiveScore) {
       return b.adaptiveScore - a.adaptiveScore;
     }
-    return (
-      ((a.id * 9301 + seed) % 233280) - ((b.id * 9301 + seed) % 233280)
-    );
+    return ((a.id * 9301 + seed) % 233280) - ((b.id * 9301 + seed) % 233280);
   });
 
   const recentIds = history.slice(-7);
@@ -449,7 +445,6 @@ function App() {
   const [history, setHistory] = useState([]);
   const [todayKey, setTodayKey] = useState(getTodayKey());
   const [currentQuoteId, setCurrentQuoteId] = useState(null);
-  const [manualMode, setManualMode] = useState(false);
   const [favorites, setFavorites] = useState([]);
   const [reactions, setReactions] = useState({
     likesByAuthor: {},
@@ -459,11 +454,13 @@ function App() {
     likesByTag: {},
     dislikesByTag: {},
   });
+  const [reminderEnabled, setReminderEnabled] = useState(false);
+const [reminderTime, setReminderTime] = useState("08:00");
   const [activeTab, setActiveTab] = useState("daily");
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [authorFilter, setAuthorFilter] = useState("All");
   const [searchText, setSearchText] = useState("");
-  const [syncStatus, setSyncStatus] = useState("Local only");
+  const [syncStatus, setSyncStatus] = useState("Syncing off");
 
   const categories = useMemo(
     () => ["All", ...Array.from(new Set(QUOTES.map((q) => q.category))).sort()],
@@ -518,6 +515,24 @@ function App() {
   }, []);
 
   useEffect(() => {
+  const savedEnabled = localStorage.getItem("reminder-enabled");
+  const savedTime = localStorage.getItem("reminder-time");
+
+  if (savedEnabled !== null) {
+    setReminderEnabled(savedEnabled === "true");
+  }
+
+  if (savedTime) {
+    setReminderTime(savedTime);
+  }
+}, []);
+
+useEffect(() => {
+  localStorage.setItem("reminder-enabled", reminderEnabled);
+  localStorage.setItem("reminder-time", reminderTime);
+}, [reminderEnabled, reminderTime]);
+
+  useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.preferences, JSON.stringify(preferences));
   }, [preferences]);
 
@@ -532,14 +547,33 @@ function App() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.reactions, JSON.stringify(reactions));
   }, [reactions]);
+  useEffect(() => {
+  if (!reminderEnabled) return;
+
+  const interval = setInterval(() => {
+    const now = new Date();
+    const [hours, minutes] = reminderTime.split(":");
+
+    if (
+      now.getHours() === parseInt(hours) &&
+      now.getMinutes() === parseInt(minutes)
+    ) {
+      alert("Your daily quote is ready 🔥");
+    }
+  }, 60000);
+
+  return () => clearInterval(interval);
+}, [reminderEnabled, reminderTime]);
 
   useEffect(() => {
-    if (!USE_SUPABASE || !supabase) {
-      return;
-    }
+    if (!USE_SUPABASE || !supabase) return;
     syncAllToSupabase();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preferences, history, favorites, reactions]);
+
+  const currentQuote = useMemo(() => {
+    return QUOTES.find((quote) => quote.id === currentQuoteId) || QUOTES[0];
+  }, [currentQuoteId]);
 
   const filteredQuotes = useMemo(() => {
     return QUOTES.filter((quote) => {
@@ -559,10 +593,6 @@ function App() {
     });
   }, [categoryFilter, authorFilter, searchText]);
 
-  const currentQuote = useMemo(() => {
-    return QUOTES.find((quote) => quote.id === currentQuoteId) || QUOTES[0];
-  }, [currentQuoteId]);
-
   const favoriteQuotes = useMemo(() => {
     return QUOTES.filter((quote) => favorites.includes(quote.id));
   }, [favorites]);
@@ -570,21 +600,16 @@ function App() {
   const preferenceSummary = useMemo(() => {
     const topCategories = Object.entries(preferences.categories || {})
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 4)
+      .slice(0, 3)
       .filter(([, value]) => value > 0);
 
     const topTags = Object.entries(preferences.tags || {})
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 6)
-      .filter(([, value]) => value > 0);
-
-    const topAuthors = Object.entries(reactions.likesByAuthor || {})
-      .sort((a, b) => b[1] - a[1])
       .slice(0, 4)
       .filter(([, value]) => value > 0);
 
-    return { topCategories, topTags, topAuthors };
-  }, [preferences, reactions]);
+    return { topCategories, topTags };
+  }, [preferences]);
 
   function updatePreferences(quote, delta) {
     setPreferences((prev) => {
@@ -621,7 +646,6 @@ function App() {
           (next.likesByAuthor[quote.author] || 0) + 1;
         next.likesByCategory[quote.category] =
           (next.likesByCategory[quote.category] || 0) + 1;
-
         quote.tags.forEach((tag) => {
           next.likesByTag[tag] = (next.likesByTag[tag] || 0) + 1;
         });
@@ -630,7 +654,6 @@ function App() {
           (next.dislikesByAuthor[quote.author] || 0) + 1;
         next.dislikesByCategory[quote.category] =
           (next.dislikesByCategory[quote.category] || 0) + 1;
-
         quote.tags.forEach((tag) => {
           next.dislikesByTag[tag] = (next.dislikesByTag[tag] || 0) + 1;
         });
@@ -641,9 +664,7 @@ function App() {
   }
 
   function recordReaction(type) {
-    if (!currentQuote) {
-      return;
-    }
+    if (!currentQuote) return;
 
     const delta = type === "like" ? 1 : -1;
     updatePreferences(currentQuote, delta);
@@ -672,7 +693,6 @@ function App() {
     );
 
     setCurrentQuoteId(nextQuote.id);
-    setManualMode(true);
     localStorage.setItem(STORAGE_KEYS.currentQuoteId, String(nextQuote.id));
   }
 
@@ -691,7 +711,6 @@ function App() {
     );
 
     setCurrentQuoteId(nextQuote.id);
-    setManualMode(true);
     localStorage.setItem(STORAGE_KEYS.currentQuoteId, String(nextQuote.id));
   }
 
@@ -702,13 +721,10 @@ function App() {
   }
 
   async function syncAllToSupabase() {
-    if (!USE_SUPABASE || !supabase) {
-      return;
-    }
+    if (!USE_SUPABASE || !supabase) return;
 
     try {
       setSyncStatus("Syncing...");
-
       const payload = {
         profile_key: "default-user",
         preferences,
@@ -722,22 +738,19 @@ function App() {
         .from("quote_user_profiles")
         .upsert(payload, { onConflict: "profile_key" });
 
-      if (error) {
-        throw error;
-      }
-
-      setSyncStatus("Synced to Supabase");
+      if (error) throw error;
+      setSyncStatus("Synced");
     } catch (error) {
       console.error(error);
       setSyncStatus("Sync failed");
     }
   }
 
-  function renderQuoteCard(quote, showMakeCurrent = false) {
+  function QuoteCard({ quote, showMakeCurrent = false }) {
     return (
-      <div key={quote.id} style={styles.quoteCard}>
-        <div style={styles.quoteCardHeader}>
-          <span style={styles.categoryBadge}>{quote.category}</span>
+      <div style={styles.listCard}>
+        <div style={styles.listCardTop}>
+          <span style={styles.miniBadge}>{quote.category}</span>
           <button
             onClick={() => toggleFavorite(quote.id)}
             style={styles.iconButton}
@@ -750,12 +763,12 @@ function App() {
           </button>
         </div>
 
-        <div style={styles.quoteTextSmall}>“{quote.text}”</div>
-        <div style={styles.authorText}>— {quote.author}</div>
+        <div style={styles.listQuote}>“{quote.text}”</div>
+        <div style={styles.listAuthor}>— {quote.author}</div>
 
-        <div style={styles.tagWrap}>
+        <div style={styles.tagRow}>
           {quote.tags.map((tag) => (
-            <span key={tag} style={styles.tagBadge}>
+            <span key={tag} style={styles.tag}>
               #{tag}
             </span>
           ))}
@@ -769,288 +782,264 @@ function App() {
             }}
             style={styles.secondaryButton}
           >
-            Make Current Quote
+            Make current quote
           </button>
         )}
       </div>
     );
   }
 
-  return (
-    <div style={styles.page}>
-      <div style={styles.container}>
-        <div style={styles.topCard}>
-          <div>
-            <div style={styles.smallLabel}>
-              <Sparkles size={16} />
-              <span>Adaptive Quote Engine</span>
-            </div>
-            <h1 style={styles.mainTitle}>Daily Quote App</h1>
+  function renderContent() {
+    if (activeTab === "daily") {
+      return (
+        <>
+          <div style={styles.heroCard}>
+            <div style={styles.heroTopRow}>
+              <div>
+                <div style={styles.eyebrow}>Quote of the day</div>
+                <div style={styles.dateText}>
+                  <CalendarDays size={15} />
+                  <span>{todayKey}</span>
+                </div>
+              </div>
 
-            <div style={styles.dateRow}>
-              <CalendarDays size={16} />
-              <span>{todayKey}</span>
-              {manualMode && <span style={styles.softBadge}>Refreshed today</span>}
-              <span style={styles.outlineBadge}>{syncStatus}</span>
+              <button
+                onClick={() => toggleFavorite(currentQuote?.id)}
+                style={styles.heroStarButton}
+                title="Toggle favorite"
+              >
+                <Star
+                  size={20}
+                  fill={favorites.includes(currentQuote?.id) ? "currentColor" : "none"}
+                />
+              </button>
+            </div>
+
+            <div style={styles.heroCategory}>{currentQuote?.category}</div>
+
+            <div style={styles.heroQuote}>“{currentQuote?.text}”</div>
+            <div style={styles.heroAuthor}>— {currentQuote?.author}</div>
+
+            <div style={styles.tagRow}>
+              {currentQuote?.tags.map((tag) => (
+                <span key={tag} style={styles.tag}>
+                  #{tag}
+                </span>
+              ))}
             </div>
           </div>
 
-          <div style={styles.tabRow}>
-            <button
-              onClick={() => setActiveTab("daily")}
-              style={activeTab === "daily" ? styles.primaryButton : styles.tabButton}
-            >
-              Daily Quote
+          <div style={styles.actionPanel}>
+            <button onClick={handleLike} style={styles.primaryAction}>
+              <Heart size={18} />
+              <span>Like</span>
             </button>
-            <button
-              onClick={() => setActiveTab("browse")}
-              style={activeTab === "browse" ? styles.primaryButton : styles.tabButton}
-            >
-              Browse Library
+
+            <button onClick={handleDislike} style={styles.softAction}>
+              <ThumbsDown size={18} />
+              <span>Dislike</span>
             </button>
+
             <button
-              onClick={() => setActiveTab("favorites")}
-              style={
-                activeTab === "favorites" ? styles.primaryButton : styles.tabButton
-              }
+              onClick={() => toggleFavorite(currentQuote?.id)}
+              style={styles.softAction}
             >
-              Favorites ({favorites.length})
+              <Star size={18} />
+              <span>Favorite</span>
             </button>
+
+            <button onClick={refreshQuote} style={styles.softAction}>
+              <RefreshCw size={18} />
+              <span>Another</span>
+            </button>
+          </div>
+
+          <div style={styles.sectionCard}>
+            <div style={styles.sectionCard}>
+  <div style={styles.sectionHeader}>Daily Reminder</div>
+
+  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+    <input
+      type="checkbox"
+      checked={reminderEnabled}
+      onChange={(e) => setReminderEnabled(e.target.checked)}
+    />
+    <span>Enable daily reminder</span>
+  </div>
+
+  {reminderEnabled && (
+    <input
+      type="time"
+      value={reminderTime}
+      onChange={(e) => setReminderTime(e.target.value)}
+      style={{ marginTop: "10px", ...styles.input }}
+    />
+  )}
+</div>
+            <div style={styles.sectionHeader}>Your taste is adapting</div>
+
+            <div style={styles.profileSection}>
+              <div style={styles.profileLabel}>Top categories</div>
+              <div style={styles.badgeWrap}>
+                {preferenceSummary.topCategories.length ? (
+                  preferenceSummary.topCategories.map(([name, score]) => (
+                    <span key={name} style={styles.profileBadge}>
+                      {name} ({score})
+                    </span>
+                  ))
+                ) : (
+                  <span style={styles.mutedText}>Rate quotes to personalize your feed.</span>
+                )}
+              </div>
+            </div>
+
+            <div style={styles.profileSection}>
+              <div style={styles.profileLabel}>Top themes</div>
+              <div style={styles.badgeWrap}>
+                {preferenceSummary.topTags.length ? (
+                  preferenceSummary.topTags.map(([name, score]) => (
+                    <span key={name} style={styles.tag}>
+                      #{name} ({score})
+                    </span>
+                  ))
+                ) : (
+                  <span style={styles.mutedText}>
+                    Likes and dislikes will shape future recommendations.
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div style={styles.syncRow}>
+              <Sparkles size={15} />
+              <span>{syncStatus}</span>
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    if (activeTab === "browse") {
+      return (
+        <>
+          <div style={styles.sectionCard}>
+            <div style={styles.sectionHeader}>Browse quotes</div>
+
+            <div style={styles.filtersStack}>
+              <select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                style={styles.input}
+              >
+                {categories.map((category) => (
+                  <option key={category} value={category}>
+                    {category}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={authorFilter}
+                onChange={(e) => setAuthorFilter(e.target.value)}
+                style={styles.input}
+              >
+                {authors.map((author) => (
+                  <option key={author} value={author}>
+                    {author}
+                  </option>
+                ))}
+              </select>
+
+              <div style={styles.searchWrap}>
+                <Search size={16} />
+                <input
+                  type="text"
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                  placeholder="Search quotes, authors, tags..."
+                  style={styles.searchInput}
+                />
+              </div>
+            </div>
+
+            <div style={styles.resultsText}>
+              {filteredQuotes.length} quotes found
+            </div>
+          </div>
+
+          <div style={styles.listStack}>
+            {filteredQuotes.map((quote) => (
+              <QuoteCard key={quote.id} quote={quote} />
+            ))}
+          </div>
+        </>
+      );
+    }
+
+    return (
+      <>
+        <div style={styles.sectionCard}>
+          <div style={styles.sectionHeader}>Favorites</div>
+          <div style={styles.resultsText}>
+            {favoriteQuotes.length} saved quotes
           </div>
         </div>
 
-        <div style={styles.mainGrid}>
-          <div style={styles.leftColumn}>
-            {activeTab === "daily" && (
-              <div style={styles.card}>
-                <div style={styles.cardHeader}>
-                  <div>
-                    <div style={styles.smallLabel}>
-                      <Sparkles size={16} />
-                      <span>Personalized daily selection</span>
-                    </div>
-                    <h2 style={styles.sectionTitle}>Quote of the Day</h2>
-                  </div>
-                  <span style={styles.categoryBadge}>{currentQuote?.category}</span>
-                </div>
-
-                <div style={styles.featuredQuoteBox}>
-                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                    <button
-                      onClick={() => toggleFavorite(currentQuote?.id)}
-                      style={styles.iconButton}
-                      title="Toggle favorite"
-                    >
-                      <Star
-                        size={20}
-                        fill={
-                          favorites.includes(currentQuote?.id) ? "currentColor" : "none"
-                        }
-                      />
-                    </button>
-                  </div>
-
-                  <div style={styles.featuredQuoteText}>“{currentQuote?.text}”</div>
-                  <div style={styles.featuredAuthor}>— {currentQuote?.author}</div>
-
-                  <div style={styles.tagWrap}>
-                    {currentQuote?.tags.map((tag) => (
-                      <span key={tag} style={styles.tagBadge}>
-                        #{tag}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                <div style={styles.actionGrid}>
-                  <button onClick={handleLike} style={styles.primaryButtonLarge}>
-                    <Heart size={18} />
-                    <span>Like</span>
-                  </button>
-
-                  <button onClick={handleDislike} style={styles.secondaryButtonLarge}>
-                    <ThumbsDown size={18} />
-                    <span>Dislike</span>
-                  </button>
-
-                  <button
-                    onClick={() => toggleFavorite(currentQuote?.id)}
-                    style={styles.outlineButtonLarge}
-                  >
-                    <Star size={18} />
-                    <span>Favorite</span>
-                  </button>
-
-                  <button onClick={refreshQuote} style={styles.outlineButtonLarge}>
-                    <RefreshCw size={18} />
-                    <span>Show Another</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {activeTab === "browse" && (
-              <div style={styles.card}>
-                <div style={styles.cardHeaderSimple}>
-                  <h2 style={styles.sectionTitle}>Browse Quote Library</h2>
-                </div>
-
-                <div style={styles.filterGrid}>
-                  <div>
-                    <div style={styles.inputLabel}>Category</div>
-                    <select
-                      value={categoryFilter}
-                      onChange={(e) => setCategoryFilter(e.target.value)}
-                      style={styles.input}
-                    >
-                      {categories.map((category) => (
-                        <option key={category} value={category}>
-                          {category}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <div style={styles.inputLabel}>Author</div>
-                    <select
-                      value={authorFilter}
-                      onChange={(e) => setAuthorFilter(e.target.value)}
-                      style={styles.input}
-                    >
-                      {authors.map((author) => (
-                        <option key={author} value={author}>
-                          {author}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <div style={styles.inputLabel}>Search</div>
-                    <div style={styles.searchWrap}>
-                      <Search size={16} />
-                      <input
-                        type="text"
-                        value={searchText}
-                        onChange={(e) => setSearchText(e.target.value)}
-                        placeholder="Search quote text, author, tag..."
-                        style={styles.searchInput}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div style={styles.helperText}>
-                  Showing {filteredQuotes.length} quotes
-                </div>
-
-                <div style={styles.quoteList}>
-                  {filteredQuotes.map((quote) => renderQuoteCard(quote))}
-                </div>
-              </div>
-            )}
-
-            {activeTab === "favorites" && (
-              <div style={styles.card}>
-                <div style={styles.cardHeaderSimple}>
-                  <h2 style={styles.sectionTitle}>Favorite Quotes</h2>
-                </div>
-
-                {favoriteQuotes.length ? (
-                  <div style={styles.quoteList}>
-                    {favoriteQuotes.map((quote) => renderQuoteCard(quote, true))}
-                  </div>
-                ) : (
-                  <div style={styles.emptyBox}>
-                    No favorites yet. Click the star on quotes you want to keep.
-                  </div>
-                )}
-              </div>
-            )}
+        {favoriteQuotes.length ? (
+          <div style={styles.listStack}>
+            {favoriteQuotes.map((quote) => (
+              <QuoteCard key={quote.id} quote={quote} showMakeCurrent />
+            ))}
           </div>
-
-          <div style={styles.rightColumn}>
-            <div style={styles.card}>
-              <h3 style={styles.sideTitle}>Your Preference Profile</h3>
-
-              <div style={styles.profileBlock}>
-                <div style={styles.inputLabel}>Top Categories</div>
-                <div style={styles.badgeWrap}>
-                  {preferenceSummary.topCategories.length ? (
-                    preferenceSummary.topCategories.map(([name, score]) => (
-                      <span key={name} style={styles.categoryBadge}>
-                        {name} ({score})
-                      </span>
-                    ))
-                  ) : (
-                    <div style={styles.helperText}>
-                      Start rating quotes to train your feed.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div style={styles.profileBlock}>
-                <div style={styles.inputLabel}>Top Themes</div>
-                <div style={styles.badgeWrap}>
-                  {preferenceSummary.topTags.length ? (
-                    preferenceSummary.topTags.map(([name, score]) => (
-                      <span key={name} style={styles.tagBadge}>
-                        #{name} ({score})
-                      </span>
-                    ))
-                  ) : (
-                    <div style={styles.helperText}>
-                      Likes and dislikes will shape future recommendations.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div style={styles.profileBlock}>
-                <div style={styles.inputLabel}>Favorite Authors</div>
-                <div style={styles.badgeWrap}>
-                  {preferenceSummary.topAuthors.length ? (
-                    preferenceSummary.topAuthors.map(([name, score]) => (
-                      <span key={name} style={styles.outlineBadge}>
-                        {name} ({score})
-                      </span>
-                    ))
-                  ) : (
-                    <div style={styles.helperText}>
-                      Author preferences will appear here after likes.
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div style={styles.card}>
-              <h3 style={styles.sideTitle}>Supabase Table Setup</h3>
-              <div style={styles.helperText}>Create this table in Supabase:</div>
-              <pre style={styles.codeBlock}>{`create table quote_user_profiles (
-  profile_key text primary key,
-  preferences jsonb,
-  history jsonb,
-  favorites jsonb,
-  reactions jsonb,
-  updated_at timestamptz default now()
-);`}</pre>
-              <div style={styles.helperText}>
-                Then switch <strong>USE_SUPABASE</strong> to true and add your
-                `supabase.js` file.
-              </div>
-            </div>
-
-            <div style={styles.card}>
-              <h3 style={styles.sideTitle}>What Changed</h3>
-              <div style={styles.listText}>• Larger quote library</div>
-              <div style={styles.listText}>• Category, author, and search filters</div>
-              <div style={styles.listText}>• Favorites tab</div>
-              <div style={styles.listText}>• Supabase sync structure</div>
+        ) : (
+          <div style={styles.emptyState}>
+            <Bookmark size={26} />
+            <div style={styles.emptyTitle}>No favorites yet</div>
+            <div style={styles.emptyText}>
+              Tap the star on any quote you want to save.
             </div>
           </div>
+        )}
+      </>
+    );
+  }
+
+  return (
+    <div style={styles.appShell}>
+      <div style={styles.phoneFrame}>
+        <div style={styles.topArea}>
+          <div>
+            <div style={styles.appOverline}>Daily inspiration</div>
+            <h1 style={styles.appTitle}>QuoteFlow</h1>
+          </div>
+        </div>
+
+        <div style={styles.contentArea}>{renderContent()}</div>
+
+        <div style={styles.bottomNav}>
+          <button
+            onClick={() => setActiveTab("daily")}
+            style={activeTab === "daily" ? styles.navButtonActive : styles.navButton}
+          >
+            <Home size={18} />
+            <span>Today</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("browse")}
+            style={activeTab === "browse" ? styles.navButtonActive : styles.navButton}
+          >
+            <BookOpen size={18} />
+            <span>Browse</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("favorites")}
+            style={activeTab === "favorites" ? styles.navButtonActive : styles.navButton}
+          >
+            <Bookmark size={18} />
+            <span>Saved</span>
+          </button>
         </div>
       </div>
     </div>
@@ -1058,355 +1047,374 @@ function App() {
 }
 
 const styles = {
-  page: {
+  appShell: {
     minHeight: "100vh",
-    background: "#f8fafc",
-    padding: "20px",
-  },
-  container: {
-    maxWidth: "1280px",
-    margin: "0 auto",
-  },
-  topCard: {
-    background: "#ffffff",
-    borderRadius: "20px",
-    padding: "24px",
-    boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)",
+    background:
+      "linear-gradient(180deg, #0f172a 0%, #172554 35%, #eff6ff 35%, #f8fafc 100%)",
     display: "flex",
-    justifyContent: "space-between",
-    gap: "20px",
-    alignItems: "flex-start",
-    flexWrap: "wrap",
-    marginBottom: "24px",
+    justifyContent: "center",
+    padding: "16px",
   },
-  smallLabel: {
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-    fontSize: "14px",
-    color: "#64748b",
-    marginBottom: "8px",
-  },
-  mainTitle: {
-    margin: 0,
-    fontSize: "36px",
-    color: "#0f172a",
-  },
-  dateRow: {
-    display: "flex",
-    gap: "10px",
-    alignItems: "center",
-    flexWrap: "wrap",
-    color: "#64748b",
-    fontSize: "14px",
-    marginTop: "10px",
-  },
-  tabRow: {
-    display: "flex",
-    gap: "10px",
-    flexWrap: "wrap",
-  },
-  mainGrid: {
-    display: "grid",
-    gridTemplateColumns: "2fr 1fr",
-    gap: "24px",
-  },
-  leftColumn: {
+  phoneFrame: {
+    width: "100%",
+    maxWidth: "480px",
+    minHeight: "100vh",
     display: "flex",
     flexDirection: "column",
-    gap: "24px",
   },
-  rightColumn: {
+  topArea: {
+    padding: "8px 4px 18px 4px",
+    color: "#ffffff",
+  },
+  appOverline: {
+    fontSize: "13px",
+    opacity: 0.8,
+    marginBottom: "6px",
+  },
+  appTitle: {
+    margin: 0,
+    fontSize: "32px",
+    fontWeight: 800,
+    letterSpacing: "-0.02em",
+  },
+  contentArea: {
+    flex: 1,
     display: "flex",
     flexDirection: "column",
-    gap: "24px",
+    gap: "14px",
+    paddingBottom: "96px",
   },
-  card: {
-    background: "#ffffff",
-    borderRadius: "20px",
-    padding: "24px",
-    boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)",
+  heroCard: {
+    background: "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
+    borderRadius: "28px",
+    padding: "22px",
+    boxShadow: "0 18px 40px rgba(15, 23, 42, 0.12)",
+    border: "1px solid rgba(255,255,255,0.8)",
   },
-  cardHeader: {
+  heroTopRow: {
     display: "flex",
     justifyContent: "space-between",
-    gap: "16px",
     alignItems: "flex-start",
-    flexWrap: "wrap",
-    marginBottom: "18px",
+    gap: "12px",
   },
-  cardHeaderSimple: {
-    marginBottom: "18px",
+  eyebrow: {
+    fontSize: "13px",
+    fontWeight: 700,
+    color: "#6366f1",
+    marginBottom: "6px",
   },
-  sectionTitle: {
-    margin: 0,
-    fontSize: "30px",
-    color: "#0f172a",
+  dateText: {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    color: "#64748b",
+    fontSize: "13px",
   },
-  sideTitle: {
-    margin: "0 0 16px 0",
-    fontSize: "22px",
-    color: "#0f172a",
+  heroStarButton: {
+    width: "44px",
+    height: "44px",
+    borderRadius: "999px",
+    border: "none",
+    background: "#eef2ff",
+    color: "#4338ca",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    flexShrink: 0,
   },
-  featuredQuoteBox: {
-    background: "#ffffff",
-    border: "1px solid #e2e8f0",
-    borderRadius: "20px",
-    padding: "24px",
-    boxShadow: "0 4px 12px rgba(15, 23, 42, 0.04)",
+  heroCategory: {
+    marginTop: "18px",
+    display: "inline-flex",
+    padding: "8px 14px",
+    borderRadius: "999px",
+    background: "#e0e7ff",
+    color: "#3730a3",
+    fontSize: "13px",
+    fontWeight: 700,
   },
-  featuredQuoteText: {
-    fontSize: "34px",
-    lineHeight: 1.5,
-    color: "#1e293b",
-    marginTop: "10px",
-  },
-  featuredAuthor: {
+  heroQuote: {
     marginTop: "20px",
-    fontSize: "18px",
+    fontSize: "30px",
+    lineHeight: 1.45,
+    fontWeight: 700,
+    color: "#0f172a",
+    letterSpacing: "-0.02em",
+    wordBreak: "break-word",
+  },
+  heroAuthor: {
+    marginTop: "18px",
+    fontSize: "17px",
     fontWeight: 700,
     color: "#475569",
   },
-  quoteCard: {
-    background: "#ffffff",
-    border: "1px solid #e2e8f0",
-    borderRadius: "18px",
-    padding: "18px",
-    boxShadow: "0 4px 12px rgba(15, 23, 42, 0.04)",
-  },
-  quoteCardHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: "10px",
-    alignItems: "center",
-  },
-  quoteTextSmall: {
-    marginTop: "14px",
-    fontSize: "20px",
-    lineHeight: 1.6,
-    color: "#1e293b",
-  },
-  authorText: {
-    marginTop: "14px",
-    fontWeight: 700,
-    color: "#475569",
-  },
-  tagWrap: {
+  tagRow: {
+    marginTop: "16px",
     display: "flex",
     flexWrap: "wrap",
     gap: "8px",
-    marginTop: "14px",
+  },
+  tag: {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "7px 12px",
+    borderRadius: "999px",
+    background: "#e2e8f0",
+    color: "#334155",
+    fontSize: "12px",
+    fontWeight: 700,
+  },
+  actionPanel: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "10px",
+  },
+  primaryAction: {
+    height: "54px",
+    borderRadius: "18px",
+    border: "none",
+    background: "#2563eb",
+    color: "#ffffff",
+    fontWeight: 800,
+    fontSize: "15px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "8px",
+    cursor: "pointer",
+    boxShadow: "0 10px 20px rgba(37, 99, 235, 0.25)",
+  },
+  softAction: {
+    height: "54px",
+    borderRadius: "18px",
+    border: "1px solid #dbeafe",
+    background: "#ffffff",
+    color: "#0f172a",
+    fontWeight: 700,
+    fontSize: "15px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "8px",
+    cursor: "pointer",
+  },
+  sectionCard: {
+    background: "#ffffff",
+    borderRadius: "24px",
+    padding: "18px",
+    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.08)",
+  },
+  sectionHeader: {
+    fontSize: "20px",
+    fontWeight: 800,
+    color: "#0f172a",
+    marginBottom: "14px",
+  },
+  profileSection: {
+    marginBottom: "14px",
+  },
+  profileLabel: {
+    fontSize: "13px",
+    fontWeight: 700,
+    color: "#64748b",
+    marginBottom: "10px",
   },
   badgeWrap: {
     display: "flex",
     flexWrap: "wrap",
     gap: "8px",
   },
-  categoryBadge: {
+  profileBadge: {
     display: "inline-flex",
     alignItems: "center",
-    padding: "6px 12px",
+    padding: "7px 12px",
     borderRadius: "999px",
-    background: "#2563eb",
-    color: "#ffffff",
+    background: "#dbeafe",
+    color: "#1d4ed8",
+    fontSize: "12px",
+    fontWeight: 800,
+  },
+  mutedText: {
+    fontSize: "14px",
+    color: "#64748b",
+    lineHeight: 1.5,
+  },
+  syncRow: {
+    marginTop: "4px",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    color: "#64748b",
     fontSize: "13px",
     fontWeight: 600,
   },
-  tagBadge: {
-    display: "inline-flex",
-    alignItems: "center",
-    padding: "6px 12px",
-    borderRadius: "999px",
-    background: "#e2e8f0",
-    color: "#334155",
-    fontSize: "13px",
-    fontWeight: 600,
-  },
-  softBadge: {
-    display: "inline-flex",
-    alignItems: "center",
-    padding: "6px 12px",
-    borderRadius: "999px",
-    background: "#eef2ff",
-    color: "#4338ca",
-    fontSize: "13px",
-    fontWeight: 600,
-  },
-  outlineBadge: {
-    display: "inline-flex",
-    alignItems: "center",
-    padding: "6px 12px",
-    borderRadius: "999px",
-    border: "1px solid #cbd5e1",
-    color: "#475569",
-    fontSize: "13px",
-    fontWeight: 600,
-    background: "#ffffff",
-  },
-  actionGrid: {
+  filtersStack: {
     display: "grid",
-    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+    gap: "10px",
+  },
+  input: {
+    width: "100%",
+    height: "48px",
+    borderRadius: "16px",
+    border: "1px solid #cbd5e1",
+    background: "#ffffff",
+    padding: "0 14px",
+    fontSize: "15px",
+    color: "#0f172a",
+  },
+  searchWrap: {
+    height: "48px",
+    borderRadius: "16px",
+    border: "1px solid #cbd5e1",
+    background: "#ffffff",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    padding: "0 14px",
+    color: "#64748b",
+  },
+  searchInput: {
+    width: "100%",
+    border: "none",
+    outline: "none",
+    background: "transparent",
+    fontSize: "15px",
+    color: "#0f172a",
+  },
+  resultsText: {
+    fontSize: "13px",
+    color: "#64748b",
+    fontWeight: 600,
+  },
+  listStack: {
+    display: "grid",
     gap: "12px",
-    marginTop: "18px",
   },
-  primaryButton: {
-    height: "42px",
-    padding: "0 16px",
-    border: "none",
-    borderRadius: "14px",
-    background: "#2563eb",
-    color: "#ffffff",
-    fontWeight: 700,
-    cursor: "pointer",
-  },
-  tabButton: {
-    height: "42px",
-    padding: "0 16px",
-    border: "1px solid #cbd5e1",
-    borderRadius: "14px",
+  listCard: {
     background: "#ffffff",
-    color: "#0f172a",
-    fontWeight: 700,
-    cursor: "pointer",
+    borderRadius: "22px",
+    padding: "18px",
+    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.08)",
   },
-  primaryButtonLarge: {
-    height: "54px",
-    padding: "0 16px",
-    border: "none",
-    borderRadius: "16px",
-    background: "#2563eb",
-    color: "#ffffff",
-    fontWeight: 700,
-    cursor: "pointer",
+  listCardTop: {
     display: "flex",
-    gap: "8px",
+    justifyContent: "space-between",
     alignItems: "center",
-    justifyContent: "center",
+    gap: "10px",
   },
-  secondaryButton: {
-    marginTop: "14px",
-    height: "42px",
-    padding: "0 16px",
-    border: "1px solid #cbd5e1",
-    borderRadius: "14px",
-    background: "#ffffff",
-    color: "#0f172a",
-    fontWeight: 700,
-    cursor: "pointer",
-  },
-  secondaryButtonLarge: {
-    height: "54px",
-    padding: "0 16px",
-    border: "none",
-    borderRadius: "16px",
-    background: "#e2e8f0",
-    color: "#0f172a",
-    fontWeight: 700,
-    cursor: "pointer",
-    display: "flex",
-    gap: "8px",
+  miniBadge: {
+    display: "inline-flex",
     alignItems: "center",
-    justifyContent: "center",
-  },
-  outlineButtonLarge: {
-    height: "54px",
-    padding: "0 16px",
-    border: "1px solid #cbd5e1",
-    borderRadius: "16px",
-    background: "#ffffff",
-    color: "#0f172a",
-    fontWeight: 700,
-    cursor: "pointer",
-    display: "flex",
-    gap: "8px",
-    alignItems: "center",
-    justifyContent: "center",
+    padding: "6px 11px",
+    borderRadius: "999px",
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    fontSize: "12px",
+    fontWeight: 800,
   },
   iconButton: {
     width: "40px",
     height: "40px",
-    border: "1px solid #cbd5e1",
     borderRadius: "999px",
-    background: "#ffffff",
+    border: "none",
+    background: "#f1f5f9",
     color: "#0f172a",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     cursor: "pointer",
   },
-  filterGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-    gap: "12px",
-    marginBottom: "14px",
-  },
-  inputLabel: {
-    marginBottom: "8px",
-    fontSize: "14px",
-    color: "#64748b",
+  listQuote: {
+    marginTop: "14px",
+    fontSize: "21px",
+    lineHeight: 1.55,
+    color: "#0f172a",
     fontWeight: 700,
+    letterSpacing: "-0.01em",
   },
-  input: {
-    width: "100%",
-    height: "44px",
-    borderRadius: "14px",
-    border: "1px solid #cbd5e1",
-    background: "#ffffff",
-    padding: "0 12px",
-    fontSize: "14px",
-    color: "#0f172a",
-  },
-  searchWrap: {
-    height: "44px",
-    borderRadius: "14px",
-    border: "1px solid #cbd5e1",
-    background: "#ffffff",
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-    padding: "0 12px",
-  },
-  searchInput: {
-    border: "none",
-    outline: "none",
-    width: "100%",
-    fontSize: "14px",
-    color: "#0f172a",
-    background: "transparent",
-  },
-  helperText: {
-    fontSize: "14px",
-    color: "#64748b",
-    lineHeight: 1.6,
-  },
-  quoteList: {
-    display: "grid",
-    gap: "14px",
-  },
-  profileBlock: {
-    marginBottom: "18px",
-  },
-  codeBlock: {
-    background: "#0f172a",
-    color: "#e2e8f0",
-    padding: "16px",
-    borderRadius: "14px",
-    overflowX: "auto",
-    fontSize: "12px",
-    lineHeight: 1.6,
-  },
-  listText: {
-    fontSize: "14px",
+  listAuthor: {
+    marginTop: "14px",
+    fontSize: "15px",
+    fontWeight: 700,
     color: "#475569",
-    lineHeight: 1.8,
   },
-  emptyBox: {
-    border: "1px dashed #cbd5e1",
-    borderRadius: "18px",
+  secondaryButton: {
+    marginTop: "14px",
+    height: "46px",
+    width: "100%",
+    borderRadius: "16px",
+    border: "1px solid #cbd5e1",
     background: "#ffffff",
-    padding: "32px",
+    color: "#0f172a",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  emptyState: {
+    background: "#ffffff",
+    borderRadius: "24px",
+    padding: "28px",
+    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.08)",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
     textAlign: "center",
     color: "#64748b",
+    gap: "10px",
+  },
+  emptyTitle: {
+    fontSize: "18px",
+    fontWeight: 800,
+    color: "#0f172a",
+  },
+  emptyText: {
+    fontSize: "14px",
+    lineHeight: 1.5,
+  },
+  bottomNav: {
+    position: "fixed",
+    left: "50%",
+    transform: "translateX(-50%)",
+    bottom: "14px",
+    width: "calc(100% - 24px)",
+    maxWidth: "452px",
+    background: "rgba(15, 23, 42, 0.92)",
+    backdropFilter: "blur(14px)",
+    borderRadius: "22px",
+    padding: "10px",
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr 1fr",
+    gap: "8px",
+    boxShadow: "0 20px 30px rgba(15, 23, 42, 0.25)",
+  },
+  navButton: {
+    height: "54px",
+    borderRadius: "16px",
+    border: "none",
+    background: "transparent",
+    color: "rgba(255,255,255,0.72)",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "4px",
+    fontSize: "12px",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  navButtonActive: {
+    height: "54px",
+    borderRadius: "16px",
+    border: "none",
+    background: "#ffffff",
+    color: "#0f172a",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "4px",
+    fontSize: "12px",
+    fontWeight: 800,
+    cursor: "pointer",
   },
 };
 
