@@ -454,13 +454,15 @@ function App() {
     likesByTag: {},
     dislikesByTag: {},
   });
-  const [reminderEnabled, setReminderEnabled] = useState(false);
-const [reminderTime, setReminderTime] = useState("08:00");
   const [activeTab, setActiveTab] = useState("daily");
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [authorFilter, setAuthorFilter] = useState("All");
   const [searchText, setSearchText] = useState("");
   const [syncStatus, setSyncStatus] = useState("Syncing off");
+
+  const [reminderEnabled, setReminderEnabled] = useState(false);
+  const [reminderTime, setReminderTime] = useState("08:00");
+  const [pushEnabled, setPushEnabled] = useState(false);
 
   const categories = useMemo(
     () => ["All", ...Array.from(new Set(QUOTES.map((q) => q.category))).sort()],
@@ -515,22 +517,17 @@ const [reminderTime, setReminderTime] = useState("08:00");
   }, []);
 
   useEffect(() => {
-  const savedEnabled = localStorage.getItem("reminder-enabled");
-  const savedTime = localStorage.getItem("reminder-time");
+    const savedEnabled = localStorage.getItem("reminder-enabled");
+    const savedTime = localStorage.getItem("reminder-time");
 
-  if (savedEnabled !== null) {
-    setReminderEnabled(savedEnabled === "true");
-  }
+    if (savedEnabled !== null) {
+      setReminderEnabled(savedEnabled === "true");
+    }
 
-  if (savedTime) {
-    setReminderTime(savedTime);
-  }
-}, []);
-
-useEffect(() => {
-  localStorage.setItem("reminder-enabled", reminderEnabled);
-  localStorage.setItem("reminder-time", reminderTime);
-}, [reminderEnabled, reminderTime]);
+    if (savedTime) {
+      setReminderTime(savedTime);
+    }
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.preferences, JSON.stringify(preferences));
@@ -547,29 +544,53 @@ useEffect(() => {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.reactions, JSON.stringify(reactions));
   }, [reactions]);
+
   useEffect(() => {
-  if (!reminderEnabled) return;
+    localStorage.setItem("reminder-enabled", reminderEnabled);
+    localStorage.setItem("reminder-time", reminderTime);
+  }, [reminderEnabled, reminderTime]);
 
-  const interval = setInterval(() => {
-    const now = new Date();
-    const [hours, minutes] = reminderTime.split(":");
+  useEffect(() => {
+    if (!reminderEnabled) return undefined;
 
-    if (
-      now.getHours() === parseInt(hours) &&
-      now.getMinutes() === parseInt(minutes)
-    ) {
-      alert("Your daily quote is ready 🔥");
-    }
-  }, 60000);
+    const interval = setInterval(() => {
+      const now = new Date();
+      const [hours, minutes] = reminderTime.split(":");
 
-  return () => clearInterval(interval);
-}, [reminderEnabled, reminderTime]);
+      if (
+        now.getHours() === parseInt(hours, 10) &&
+        now.getMinutes() === parseInt(minutes, 10)
+      ) {
+        alert("Your daily quote is ready 🔥");
+      }
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, [reminderEnabled, reminderTime]);
 
   useEffect(() => {
     if (!USE_SUPABASE || !supabase) return;
     syncAllToSupabase();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preferences, history, favorites, reactions]);
+
+  useEffect(() => {
+    async function checkPushStatus() {
+      if (!("serviceWorker" in navigator)) return;
+
+      try {
+        const registration = await navigator.serviceWorker.getRegistration("/sw.js");
+        if (!registration) return;
+
+        const subscription = await registration.pushManager.getSubscription();
+        setPushEnabled(!!subscription);
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    checkPushStatus();
+  }, []);
 
   const currentQuote = useMemo(() => {
     return QUOTES.find((quote) => quote.id === currentQuoteId) || QUOTES[0];
@@ -618,7 +639,8 @@ useEffect(() => {
         tags: { ...(prev.tags || {}) },
       };
 
-      next.categories[quote.category] = (next.categories[quote.category] || 0) + delta;
+      next.categories[quote.category] =
+        (next.categories[quote.category] || 0) + delta;
 
       quote.tags.forEach((tag) => {
         next.tags[tag] = (next.tags[tag] || 0) + delta;
@@ -720,6 +742,77 @@ useEffect(() => {
     );
   }
 
+  function urlBase64ToUint8Array(base64String) {
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+
+    for (let i = 0; i < rawData.length; i += 1) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+
+    return outputArray;
+  }
+
+  async function enablePushNotifications() {
+    try {
+      if (!("serviceWorker" in navigator)) {
+        alert("Service workers are not supported on this device/browser.");
+        return;
+      }
+
+      if (!("PushManager" in window)) {
+        alert("Push notifications are not supported on this device/browser.");
+        return;
+      }
+
+      const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+      if (!vapidPublicKey) {
+        alert("Missing VITE_VAPID_PUBLIC_KEY in your environment variables.");
+        return;
+      }
+
+      const permission = await Notification.requestPermission();
+
+      if (permission !== "granted") {
+        alert("Notification permission was not granted.");
+        return;
+      }
+
+      const registration = await navigator.serviceWorker.register("/sw.js");
+
+      const existingSubscription = await registration.pushManager.getSubscription();
+
+      let subscription = existingSubscription;
+
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+        });
+      }
+
+      const response = await fetch("/api/save-subscription", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(subscription),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to save subscription");
+      }
+
+      setPushEnabled(true);
+      alert("Push notifications are enabled.");
+    } catch (error) {
+      console.error(error);
+      alert("Could not enable push notifications.");
+    }
+  }
+
   async function syncAllToSupabase() {
     if (!USE_SUPABASE || !supabase) return;
 
@@ -816,7 +909,6 @@ useEffect(() => {
             </div>
 
             <div style={styles.heroCategory}>{currentQuote?.category}</div>
-
             <div style={styles.heroQuote}>“{currentQuote?.text}”</div>
             <div style={styles.heroAuthor}>— {currentQuote?.author}</div>
 
@@ -855,27 +947,47 @@ useEffect(() => {
           </div>
 
           <div style={styles.sectionCard}>
-            <div style={styles.sectionCard}>
-  <div style={styles.sectionHeader}>Daily Reminder</div>
+            <div style={styles.sectionHeader}>Daily Reminder</div>
 
-  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-    <input
-      type="checkbox"
-      checked={reminderEnabled}
-      onChange={(e) => setReminderEnabled(e.target.checked)}
-    />
-    <span>Enable daily reminder</span>
-  </div>
+            <div style={styles.settingsRow}>
+              <input
+                type="checkbox"
+                checked={reminderEnabled}
+                onChange={(e) => setReminderEnabled(e.target.checked)}
+              />
+              <span style={styles.resultsText}>Enable daily reminder</span>
+            </div>
 
-  {reminderEnabled && (
-    <input
-      type="time"
-      value={reminderTime}
-      onChange={(e) => setReminderTime(e.target.value)}
-      style={{ marginTop: "10px", ...styles.input }}
-    />
-  )}
-</div>
+            {reminderEnabled && (
+              <input
+                type="time"
+                value={reminderTime}
+                onChange={(e) => setReminderTime(e.target.value)}
+                style={{ ...styles.input, marginTop: "10px" }}
+              />
+            )}
+          </div>
+
+          <div style={styles.sectionCard}>
+            <div style={styles.sectionHeader}>Push Notifications</div>
+
+            <div style={styles.resultsText}>
+              {pushEnabled
+                ? "Push notifications are enabled."
+                : "Enable a real daily notification."}
+            </div>
+
+            {!pushEnabled && (
+              <button
+                onClick={enablePushNotifications}
+                style={{ ...styles.primaryAction, marginTop: "12px", width: "100%" }}
+              >
+                Enable Push Notifications
+              </button>
+            )}
+          </div>
+
+          <div style={styles.sectionCard}>
             <div style={styles.sectionHeader}>Your taste is adapting</div>
 
             <div style={styles.profileSection}>
@@ -962,9 +1074,7 @@ useEffect(() => {
               </div>
             </div>
 
-            <div style={styles.resultsText}>
-              {filteredQuotes.length} quotes found
-            </div>
+            <div style={styles.resultsText}>{filteredQuotes.length} quotes found</div>
           </div>
 
           <div style={styles.listStack}>
@@ -980,9 +1090,7 @@ useEffect(() => {
       <>
         <div style={styles.sectionCard}>
           <div style={styles.sectionHeader}>Favorites</div>
-          <div style={styles.resultsText}>
-            {favoriteQuotes.length} saved quotes
-          </div>
+          <div style={styles.resultsText}>{favoriteQuotes.length} saved quotes</div>
         </div>
 
         {favoriteQuotes.length ? (
@@ -1209,6 +1317,11 @@ const styles = {
     fontWeight: 800,
     color: "#0f172a",
     marginBottom: "14px",
+  },
+  settingsRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
   },
   profileSection: {
     marginBottom: "14px",
