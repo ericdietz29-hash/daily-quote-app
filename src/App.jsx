@@ -994,7 +994,7 @@ function App() {
   }}
   style={{ ...styles.primaryAction, marginTop: "12px", width: "100%" }}
 >
-  Enable Push Notifications TEST
+  Enable Push Notifications
 </button>
             )}
           </div>
