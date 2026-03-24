@@ -74,14 +74,24 @@ function safeRead(key, fallback) {
   }
 }
 
+function normalizeQuote(quote) {
+  return {
+    ...quote,
+    author: quote?.author || "Unknown",
+    category: quote?.category || "General",
+    tags: Array.isArray(quote?.tags) ? quote.tags : [],
+  };
+}
+
 function scoreQuote(quote, preferences, reactions, history) {
   let score = 0;
+  const tags = Array.isArray(quote.tags) ? quote.tags : [];
 
   score += (preferences.categories?.[quote.category] || 0) * 3;
   score += (reactions.likesByCategory?.[quote.category] || 0) * 2;
   score -= (reactions.dislikesByCategory?.[quote.category] || 0) * 3;
 
-  quote.tags.forEach((tag) => {
+  tags.forEach((tag) => {
     score += (preferences.tags?.[tag] || 0) * 2;
     score += (reactions.likesByTag?.[tag] || 0) * 1.5;
     score -= (reactions.dislikesByTag?.[tag] || 0) * 2;
@@ -117,13 +127,15 @@ function pickDailyQuote(
 
   if (filters.search) {
     const query = filters.search.toLowerCase();
-    pool = pool.filter(
-      (quote) =>
+    pool = pool.filter((quote) => {
+      const tags = Array.isArray(quote.tags) ? quote.tags : [];
+      return (
         quote.text.toLowerCase().includes(query) ||
         quote.author.toLowerCase().includes(query) ||
         quote.category.toLowerCase().includes(query) ||
-        quote.tags.some((tag) => tag.toLowerCase().includes(query))
-    );
+        tags.some((tag) => tag.toLowerCase().includes(query))
+      );
+    });
   }
 
   if (!pool.length) return quotes[0];
@@ -173,6 +185,12 @@ function App() {
   const [reminderEnabled, setReminderEnabled] = useState(false);
   const [reminderTime, setReminderTime] = useState("08:00");
   const [pushEnabled, setPushEnabled] = useState(false);
+
+  const [adminQuoteText, setAdminQuoteText] = useState("");
+  const [adminQuoteAuthor, setAdminQuoteAuthor] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminMessage, setAdminMessage] = useState("");
 
   const activeQuotes = useMemo(() => {
     return quotes.length ? quotes : FALLBACK_QUOTES;
@@ -233,12 +251,7 @@ function App() {
 
         if (error) throw error;
 
-        const normalized =
-          (data || []).map((quote) => ({
-            ...quote,
-            tags: Array.isArray(quote.tags) ? quote.tags : [],
-          })) || [];
-
+        const normalized = (data || []).map((quote) => normalizeQuote(quote));
         setQuotes(normalized);
       } catch (error) {
         console.error("Failed to load quotes:", error);
@@ -360,12 +373,14 @@ function App() {
       const authorMatch = authorFilter === "All" || quote.author === authorFilter;
 
       const query = searchText.trim().toLowerCase();
+      const tags = Array.isArray(quote.tags) ? quote.tags : [];
+
       const searchMatch =
         !query ||
         quote.text.toLowerCase().includes(query) ||
         quote.author.toLowerCase().includes(query) ||
         quote.category.toLowerCase().includes(query) ||
-        quote.tags.some((tag) => tag.toLowerCase().includes(query));
+        tags.some((tag) => tag.toLowerCase().includes(query));
 
       return categoryMatch && authorMatch && searchMatch;
     });
@@ -390,6 +405,8 @@ function App() {
   }, [preferences]);
 
   function updatePreferences(quote, delta) {
+    const tags = Array.isArray(quote.tags) ? quote.tags : [];
+
     setPreferences((prev) => {
       const next = {
         categories: { ...(prev.categories || {}) },
@@ -399,7 +416,7 @@ function App() {
       next.categories[quote.category] =
         (next.categories[quote.category] || 0) + delta;
 
-      quote.tags.forEach((tag) => {
+      tags.forEach((tag) => {
         next.tags[tag] = (next.tags[tag] || 0) + delta;
       });
 
@@ -409,6 +426,7 @@ function App() {
 
   function updateReactionBuckets(quote, type) {
     const isLike = type === "like";
+    const tags = Array.isArray(quote.tags) ? quote.tags : [];
 
     setReactions((prev) => {
       const next = {
@@ -425,7 +443,7 @@ function App() {
           (next.likesByAuthor[quote.author] || 0) + 1;
         next.likesByCategory[quote.category] =
           (next.likesByCategory[quote.category] || 0) + 1;
-        quote.tags.forEach((tag) => {
+        tags.forEach((tag) => {
           next.likesByTag[tag] = (next.likesByTag[tag] || 0) + 1;
         });
       } else {
@@ -433,7 +451,7 @@ function App() {
           (next.dislikesByAuthor[quote.author] || 0) + 1;
         next.dislikesByCategory[quote.category] =
           (next.dislikesByCategory[quote.category] || 0) + 1;
-        quote.tags.forEach((tag) => {
+        tags.forEach((tag) => {
           next.dislikesByTag[tag] = (next.dislikesByTag[tag] || 0) + 1;
         });
       }
@@ -456,10 +474,15 @@ function App() {
   }
 
   function handleDislike() {
+    if (!currentQuote) return;
+
     recordReaction("dislike");
 
+    const remainingQuotes = activeQuotes.filter((quote) => quote.id !== currentQuote.id);
+    if (!remainingQuotes.length) return;
+
     const nextQuote = pickDailyQuote(
-      activeQuotes.filter((quote) => quote.id !== currentQuote.id),
+      remainingQuotes,
       preferences,
       reactions,
       [...history, currentQuote.id],
@@ -471,13 +494,20 @@ function App() {
       }
     );
 
-    setCurrentQuoteId(nextQuote.id);
-    localStorage.setItem(STORAGE_KEYS.currentQuoteId, String(nextQuote.id));
+    if (nextQuote) {
+      setCurrentQuoteId(nextQuote.id);
+      localStorage.setItem(STORAGE_KEYS.currentQuoteId, String(nextQuote.id));
+    }
   }
 
   function refreshQuote() {
+    if (!currentQuote) return;
+
+    const remainingQuotes = activeQuotes.filter((quote) => quote.id !== currentQuote.id);
+    if (!remainingQuotes.length) return;
+
     const nextQuote = pickDailyQuote(
-      activeQuotes.filter((quote) => quote.id !== currentQuote.id),
+      remainingQuotes,
       preferences,
       reactions,
       [...history, currentQuote.id],
@@ -489,8 +519,10 @@ function App() {
       }
     );
 
-    setCurrentQuoteId(nextQuote.id);
-    localStorage.setItem(STORAGE_KEYS.currentQuoteId, String(nextQuote.id));
+    if (nextQuote) {
+      setCurrentQuoteId(nextQuote.id);
+      localStorage.setItem(STORAGE_KEYS.currentQuoteId, String(nextQuote.id));
+    }
   }
 
   function toggleFavorite(id) {
@@ -596,7 +628,67 @@ function App() {
     }
   }
 
+  async function handleAddQuote() {
+    setAdminMessage("");
+
+    if (!adminQuoteText.trim()) {
+      setAdminMessage("Please enter a quote.");
+      return;
+    }
+
+    if (!adminPassword.trim()) {
+      setAdminMessage("Please enter the admin password.");
+      return;
+    }
+
+    try {
+      setAdminLoading(true);
+
+      const response = await fetch("/api/add-quote", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text: adminQuoteText,
+          author: adminQuoteAuthor,
+          adminPassword,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        setAdminMessage(result.error || "Failed to add quote.");
+        return;
+      }
+
+      const addedQuote = normalizeQuote(result.quote || {});
+
+      if (addedQuote?.id) {
+        setQuotes((prev) => [...prev, addedQuote]);
+      }
+
+      setCurrentQuoteId(addedQuote?.id || currentQuoteId);
+      localStorage.setItem(
+        STORAGE_KEYS.currentQuoteId,
+        String(addedQuote?.id || currentQuoteId || "")
+      );
+
+      setAdminQuoteText("");
+      setAdminQuoteAuthor("");
+      setAdminMessage("Quote added successfully.");
+    } catch (error) {
+      console.error("Add quote error:", error);
+      setAdminMessage("Something went wrong while adding the quote.");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
   function QuoteCard({ quote, showMakeCurrent = false }) {
+    const tags = Array.isArray(quote.tags) ? quote.tags : [];
+
     return (
       <div style={styles.listCard}>
         <div style={styles.listCardTop}>
@@ -617,7 +709,7 @@ function App() {
         <div style={styles.listAuthor}>— {quote.author}</div>
 
         <div style={styles.tagRow}>
-          {quote.tags.map((tag) => (
+          {tags.map((tag) => (
             <span key={tag} style={styles.tag}>
               #{tag}
             </span>
@@ -678,7 +770,7 @@ function App() {
             <div style={styles.heroAuthor}>— {currentQuote?.author}</div>
 
             <div style={styles.tagRow}>
-              {currentQuote?.tags.map((tag) => (
+              {(currentQuote?.tags || []).map((tag) => (
                 <span key={tag} style={styles.tag}>
                   #{tag}
                 </span>
@@ -851,28 +943,91 @@ function App() {
       );
     }
 
+    if (activeTab === "favorites") {
+      return (
+        <>
+          <div style={styles.sectionCard}>
+            <div style={styles.sectionHeader}>Favorites</div>
+            <div style={styles.resultsText}>{favoriteQuotes.length} saved quotes</div>
+          </div>
+
+          {favoriteQuotes.length ? (
+            <div style={styles.listStack}>
+              {favoriteQuotes.map((quote) => (
+                <QuoteCard key={quote.id} quote={quote} showMakeCurrent />
+              ))}
+            </div>
+          ) : (
+            <div style={styles.emptyState}>
+              <Bookmark size={26} />
+              <div style={styles.emptyTitle}>No favorites yet</div>
+              <div style={styles.emptyText}>
+                Tap the star on any quote you want to save.
+              </div>
+            </div>
+          )}
+        </>
+      );
+    }
+
     return (
       <>
         <div style={styles.sectionCard}>
-          <div style={styles.sectionHeader}>Favorites</div>
-          <div style={styles.resultsText}>{favoriteQuotes.length} saved quotes</div>
+          <div style={styles.sectionHeader}>Admin Quote Entry</div>
+          <div style={styles.resultsText}>
+            Add a new quote directly to Supabase.
+          </div>
+
+          <div style={{ marginTop: "14px", display: "grid", gap: "12px" }}>
+            <textarea
+              value={adminQuoteText}
+              onChange={(e) => setAdminQuoteText(e.target.value)}
+              placeholder="Enter quote text"
+              style={styles.textarea}
+              rows={5}
+            />
+
+            <input
+              type="text"
+              value={adminQuoteAuthor}
+              onChange={(e) => setAdminQuoteAuthor(e.target.value)}
+              placeholder="Enter author name"
+              style={styles.input}
+            />
+
+            <input
+              type="password"
+              value={adminPassword}
+              onChange={(e) => setAdminPassword(e.target.value)}
+              placeholder="Enter admin password"
+              style={styles.input}
+            />
+
+            <button
+              onClick={handleAddQuote}
+              disabled={adminLoading}
+              style={{
+                ...styles.primaryAction,
+                width: "100%",
+                opacity: adminLoading ? 0.7 : 1,
+              }}
+            >
+              {adminLoading ? "Saving..." : "Add Quote"}
+            </button>
+
+            {adminMessage ? (
+              <div style={styles.resultsText}>{adminMessage}</div>
+            ) : null}
+          </div>
         </div>
 
-        {favoriteQuotes.length ? (
-          <div style={styles.listStack}>
-            {favoriteQuotes.map((quote) => (
-              <QuoteCard key={quote.id} quote={quote} showMakeCurrent />
-            ))}
+        <div style={styles.sectionCard}>
+          <div style={styles.sectionHeader}>How this works</div>
+          <div style={styles.mutedText}>
+            The app sends the quote to your secure <code>/api/add-quote</code> route.
+            That route should save the quote into Supabase using your server-side key.
           </div>
-        ) : (
-          <div style={styles.emptyState}>
-            <Bookmark size={26} />
-            <div style={styles.emptyTitle}>No favorites yet</div>
-            <div style={styles.emptyText}>
-              Tap the star on any quote you want to save.
-            </div>
-          </div>
-        )}
+        </div>
       </>
     );
   }
@@ -912,6 +1067,14 @@ function App() {
           >
             <Bookmark size={18} />
             <span>Saved</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("admin")}
+            style={activeTab === "admin" ? styles.navButtonActive : styles.navButton}
+          >
+            <Sparkles size={18} />
+            <span>Admin</span>
           </button>
         </div>
       </div>
@@ -1139,6 +1302,19 @@ const styles = {
     padding: "0 14px",
     fontSize: "15px",
     color: "#0f172a",
+    boxSizing: "border-box",
+  },
+  textarea: {
+    width: "100%",
+    borderRadius: "16px",
+    border: "1px solid #cbd5e1",
+    background: "#ffffff",
+    padding: "14px",
+    fontSize: "15px",
+    color: "#0f172a",
+    resize: "vertical",
+    boxSizing: "border-box",
+    fontFamily: "inherit",
   },
   searchWrap: {
     height: "48px",
@@ -1260,7 +1436,7 @@ const styles = {
     borderRadius: "22px",
     padding: "10px",
     display: "grid",
-    gridTemplateColumns: "1fr 1fr 1fr",
+    gridTemplateColumns: "1fr 1fr 1fr 1fr",
     gap: "8px",
     boxShadow: "0 20px 30px rgba(15, 23, 42, 0.25)",
   },
