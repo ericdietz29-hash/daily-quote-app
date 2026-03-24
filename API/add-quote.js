@@ -11,33 +11,61 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { text, author, adminPassword } = req.body;
+    const body = req.body || {};
+
+    const text = typeof body.text === "string" ? body.text.trim() : "";
+    const author =
+      typeof body.author === "string" && body.author.trim()
+        ? body.author.trim()
+        : "Unknown";
+    const category =
+      typeof body.category === "string" && body.category.trim()
+        ? body.category.trim()
+        : "General";
+
+    const adminPassword = body.adminPassword;
 
     if (!adminPassword || adminPassword !== process.env.ADMIN_PASSWORD) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    if (!text || !text.trim()) {
+    if (!text) {
       return res.status(400).json({ error: "Quote text is required" });
     }
 
+    const rowToInsert = {
+      text,
+      author,
+      category,
+      tags: [],
+      is_active: true,
+    };
+
     const { data, error } = await supabase
       .from("quotes")
-      .insert([
-        {
-          text: text.trim(),
-          author: author?.trim() || "Unknown",
-        },
-      ])
+      .insert(rowToInsert)
       .select()
       .single();
 
     if (error) {
-      return res.status(500).json({ error: error.message });
+      console.error("add-quote insert error:", error);
+      console.error("add-quote rowToInsert:", rowToInsert);
+
+      return res.status(500).json({
+        error: error.message,
+        rowToInsert,
+      });
     }
 
-    return res.status(200).json({ ok: true, quote: data });
+    return res.status(200).json({
+      ok: true,
+      quote: data,
+    });
   } catch (err) {
-    return res.status(500).json({ error: err.message || "Server error" });
+    console.error("add-quote handler error:", err);
+
+    return res.status(500).json({
+      error: err.message || "Server error",
+    });
   }
 }
