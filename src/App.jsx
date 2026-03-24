@@ -187,8 +187,9 @@ function App() {
   const [pushEnabled, setPushEnabled] = useState(false);
 
   const [adminQuoteText, setAdminQuoteText] = useState("");
-  const [adminQuoteAuthor, setAdminQuoteAuthor] = useState("");
-  const [adminPassword, setAdminPassword] = useState("");
+const [adminQuoteAuthor, setAdminQuoteAuthor] = useState("");
+const [adminQuoteCategory, setAdminQuoteCategory] = useState("General");
+const [adminPassword, setAdminPassword] = useState("");
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminMessage, setAdminMessage] = useState("");
 
@@ -650,10 +651,11 @@ function App() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          text: adminQuoteText,
-          author: adminQuoteAuthor,
-          adminPassword,
-        }),
+  text: adminQuoteText,
+  author: adminQuoteAuthor,
+  category: adminQuoteCategory,
+  adminPassword,
+}),
       });
 
       const result = await response.json();
@@ -676,8 +678,9 @@ function App() {
       );
 
       setAdminQuoteText("");
-      setAdminQuoteAuthor("");
-      setAdminMessage("Quote added successfully.");
+setAdminQuoteAuthor("");
+setAdminQuoteCategory("General");
+setAdminMessage("Quote added successfully.");
     } catch (error) {
       console.error("Add quote error:", error);
       setAdminMessage("Something went wrong while adding the quote.");
@@ -988,12 +991,12 @@ function App() {
             />
 
             <input
-              type="text"
-              value={adminQuoteAuthor}
-              onChange={(e) => setAdminQuoteAuthor(e.target.value)}
-              placeholder="Enter author name"
-              style={styles.input}
-            />
+  type="text"
+  value={adminQuoteCategory}
+  onChange={(e) => setAdminQuoteCategory(e.target.value)}
+  placeholder="Enter category"
+  style={styles.input}
+/>
 
             <input
               type="password"
