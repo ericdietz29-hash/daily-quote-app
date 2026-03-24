@@ -756,71 +756,62 @@ function App() {
   }
 
   async function enablePushNotifications() {
-  try {
-    alert("enablePushNotifications started");
+    try {
+      if (!("serviceWorker" in navigator)) {
+        alert("Service workers are not supported on this device/browser.");
+        return;
+      }
 
-    if (!("serviceWorker" in navigator)) {
-      alert("Service workers are not supported on this device/browser.");
-      return;
-    }
+      if (!("PushManager" in window)) {
+        alert("Push notifications are not supported on this device/browser.");
+        return;
+      }
 
-    if (!("PushManager" in window)) {
-      alert("Push notifications are not supported on this device/browser.");
-      return;
-    }
+      const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+      if (!vapidPublicKey) {
+        alert("Missing VITE_VAPID_PUBLIC_KEY in your environment variables.");
+        return;
+      }
 
-    const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
-    if (!vapidPublicKey) {
-      alert("Missing VITE_VAPID_PUBLIC_KEY in environment variables.");
-      return;
-    }
+      const permission = await Notification.requestPermission();
 
-    const permission = await Notification.requestPermission();
-    alert(`Notification permission: ${permission}`);
+      if (permission !== "granted") {
+        alert("Notification permission was not granted.");
+        return;
+      }
 
-    if (permission !== "granted") {
-      alert("Notification permission was not granted.");
-      return;
-    }
+      const registration = await navigator.serviceWorker.register("/sw.js");
+      const existingSubscription = await registration.pushManager.getSubscription();
 
-    const registration = await navigator.serviceWorker.register("/sw.js");
-    alert("Service worker registered");
+      let subscription = existingSubscription;
 
-    const existingSubscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+        });
+      }
 
-    let subscription = existingSubscription;
-
-    if (!subscription) {
-      subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+      const response = await fetch("/api/save-subscription", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(subscription),
       });
+
+      if (!response.ok) {
+        const responseText = await response.text();
+        throw new Error(responseText || "Failed to save subscription");
+      }
+
+      setPushEnabled(true);
+      alert("Push notifications are enabled.");
+    } catch (error) {
+      console.error(error);
+      alert("Could not enable push notifications.");
     }
-
-    alert("Push subscription created");
-
-    const response = await fetch(`${window.location.origin}/api/save-subscription`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(subscription),
-    });
-
-    const responseText = await response.text();
-    alert(`Save subscription status: ${response.status}`);
-
-    if (!response.ok) {
-      throw new Error(`Failed to save subscription: ${response.status} ${responseText}`);
-    }
-
-    setPushEnabled(true);
-    alert("Push notifications are enabled.");
-  } catch (error) {
-    console.error(error);
-    alert(`Could not enable push notifications: ${error.message}`);
   }
-}
 
   async function syncAllToSupabase() {
     if (!USE_SUPABASE || !supabase) return;
@@ -988,14 +979,11 @@ function App() {
 
             {!pushEnabled && (
               <button
-  onClick={() => {
-    alert("Push button clicked");
-    enablePushNotifications();
-  }}
-  style={{ ...styles.primaryAction, marginTop: "12px", width: "100%" }}
->
-  Enable Push Notifications
-</button>
+                onClick={enablePushNotifications}
+                style={{ ...styles.primaryAction, marginTop: "12px", width: "100%" }}
+              >
+                Enable Push Notifications
+              </button>
             )}
           </div>
 
