@@ -351,22 +351,45 @@ function App() {
   }, [preferences, history, favorites, reactions]);
 
   useEffect(() => {
-    async function checkPushStatus() {
-      if (!("serviceWorker" in navigator)) return;
-
-      try {
-        const registration = await navigator.serviceWorker.getRegistration("/sw.js");
-        if (!registration) return;
-
-        const subscription = await registration.pushManager.getSubscription();
-        setPushEnabled(!!subscription);
-      } catch (error) {
-        console.error(error);
-      }
+  async function checkPushStatus() {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+      setPushEnabled(false);
+      return;
     }
 
-    checkPushStatus();
-  }, []);
+    try {
+      let subscription = null;
+
+      // Best first check: the active/ready registration for this page
+      const readyRegistration = await navigator.serviceWorker.ready;
+      if (readyRegistration) {
+        subscription = await readyRegistration.pushManager.getSubscription();
+      }
+
+      // Fallback: check all registrations in case scope lookup differs
+      if (!subscription) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+
+        for (const registration of registrations) {
+          const possibleSubscription =
+            await registration.pushManager.getSubscription();
+
+          if (possibleSubscription) {
+            subscription = possibleSubscription;
+            break;
+          }
+        }
+      }
+
+      setPushEnabled(!!subscription);
+    } catch (error) {
+      console.error("checkPushStatus error:", error);
+      setPushEnabled(false);
+    }
+  }
+
+  checkPushStatus();
+}, []);
 
   const currentQuote = useMemo(() => {
     return activeQuotes.find((quote) => quote.id === currentQuoteId) || activeQuotes[0];
@@ -593,17 +616,19 @@ function App() {
         return;
       }
 
-      const registration = await navigator.serviceWorker.register("/sw.js");
-      const existingSubscription = await registration.pushManager.getSubscription();
+      await navigator.serviceWorker.register("/sw.js");
+const registration = await navigator.serviceWorker.ready;
 
-      let subscription = existingSubscription;
+const existingSubscription = await registration.pushManager.getSubscription();
 
-      if (!subscription) {
-        subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
-        });
-      }
+let subscription = existingSubscription;
+
+if (!subscription) {
+  subscription = await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+  });
+}
 
       const response = await fetch("/api/save-subscription", {
         method: "POST",
