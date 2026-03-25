@@ -38,105 +38,6 @@ const FALLBACK_QUOTES = [
     category: "Athletics",
     tags: ["failure", "perseverance", "excellence"],
   },
-
-  {
-    id: 1001,
-    text: "Once you've wrestled, everything else in life is easy.",
-    author: "Dan Gable",
-    category: "Wrestling",
-    tags: ["toughness", "discipline", "grit"],
-  },
-  {
-    id: 1002,
-    text: "Discipline equals freedom.",
-    author: "Jocko Willink",
-    category: "Discipline",
-    tags: ["discipline", "freedom", "ownership"],
-  },
-  {
-    id: 1003,
-    text: "Grit is passion and perseverance for long-term goals.",
-    author: "Angela Duckworth",
-    category: "Psychology",
-    tags: ["grit", "perseverance", "long-term"],
-  },
-  {
-    id: 1004,
-    text: "Every man's happiness depends from himself.",
-    author: "Marcus Aurelius",
-    category: "Stoicism",
-    tags: ["mindset", "self-mastery", "stoicism"],
-  },
-  {
-    id: 1005,
-    text: "Make the best use of what is in your power, and take the rest as it happens.",
-    author: "Epictetus",
-    category: "Stoicism",
-    tags: ["control", "acceptance", "stoicism"],
-  },
-  {
-    id: 1006,
-    text: "Whether you think you can, or you think you can't—you're right.",
-    author: "Henry Ford",
-    category: "Industry",
-    tags: ["mindset", "belief", "confidence"],
-  },
-  {
-    id: 1007,
-    text: "Have not I commanded thee? Be strong and of a good courage; be not afraid.",
-    author: "Joshua 1:9",
-    category: "Bible",
-    tags: ["courage", "faith", "strength"],
-  },
-  {
-    id: 1008,
-    text: "I can do all things through Christ which strengtheneth me.",
-    author: "Philippians 4:13",
-    category: "Bible",
-    tags: ["faith", "strength", "endurance"],
-  },
-  {
-    id: 1009,
-    text: "And patience, experience; and experience, hope.",
-    author: "Romans 5:4",
-    category: "Bible",
-    tags: ["patience", "hope", "character"],
-  },
-  {
-    id: 1010,
-    text: "For a just man falleth seven times, and riseth up again.",
-    author: "Proverbs 24:16",
-    category: "Bible",
-    tags: ["resilience", "faith", "perseverance"],
-  },
-  {
-    id: 1011,
-    text: "Dwell on the beauty of life.",
-    author: "Marcus Aurelius",
-    category: "Stoicism",
-    tags: ["gratitude", "presence", "stoicism"],
-  },
-  {
-    id: 1012,
-    text: "No man is free who is not master of himself.",
-    author: "Epictetus",
-    category: "Stoicism",
-    tags: ["self-control", "freedom", "discipline"],
-  },
-  {
-    id: 1013,
-    text: "Obstacles are those frightful things you see when you take your eyes off your goal.",
-    author: "Henry Ford",
-    category: "Industry",
-    tags: ["focus", "goals", "mindset"],
-  },
-  {
-    id: 1014,
-    text: "Good.",
-    author: "Jocko Willink",
-    category: "Discipline",
-    tags: ["ownership", "resilience", "mindset"],
-  },
 ];
 
 const STORAGE_KEYS = {
@@ -194,7 +95,8 @@ function getFavoriteSignalMap(activeQuotes, favorites) {
 
   favoriteQuotes.forEach((quote) => {
     signal.authors[quote.author] = (signal.authors[quote.author] || 0) + 1;
-    signal.categories[quote.category] = (signal.categories[quote.category] || 0) + 1;
+    signal.categories[quote.category] =
+      (signal.categories[quote.category] || 0) + 1;
 
     const tags = Array.isArray(quote.tags) ? quote.tags : [];
     tags.forEach((tag) => {
@@ -212,8 +114,6 @@ function scoreQuote(quote, preferences, reactions, history, favoriteSignals) {
   score += (preferences.categories?.[quote.category] || 0) * 4;
   score += (reactions.likesByCategory?.[quote.category] || 0) * 4;
   score -= (reactions.dislikesByCategory?.[quote.category] || 0) * 5;
-
-  score += (preferences.tags?.[tags[0]] || 0) * 0; // harmless placeholder removed by loop below
 
   tags.forEach((tag) => {
     score += (preferences.tags?.[tag] || 0) * 3;
@@ -317,8 +217,6 @@ function App() {
   const [searchText, setSearchText] = useState("");
   const [syncStatus, setSyncStatus] = useState("Syncing off");
 
-  const [reminderEnabled, setReminderEnabled] = useState(false);
-  const [reminderTime, setReminderTime] = useState("08:00");
   const [pushEnabled, setPushEnabled] = useState(false);
 
   const [adminQuoteText, setAdminQuoteText] = useState("");
@@ -367,17 +265,6 @@ function App() {
     setFavorites(savedFavorites);
     setReactions(savedReactions);
     setTodayKey(getTodayKey());
-
-    const savedEnabled = localStorage.getItem("reminder-enabled");
-    const savedTime = localStorage.getItem("reminder-time");
-
-    if (savedEnabled !== null) {
-      setReminderEnabled(savedEnabled === "true");
-    }
-
-    if (savedTime) {
-      setReminderTime(savedTime);
-    }
   }, []);
 
   useEffect(() => {
@@ -456,29 +343,6 @@ function App() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.reactions, JSON.stringify(reactions));
   }, [reactions]);
-
-  useEffect(() => {
-    localStorage.setItem("reminder-enabled", reminderEnabled);
-    localStorage.setItem("reminder-time", reminderTime);
-  }, [reminderEnabled, reminderTime]);
-
-  useEffect(() => {
-    if (!reminderEnabled) return undefined;
-
-    const interval = setInterval(() => {
-      const now = new Date();
-      const [hours, minutes] = reminderTime.split(":");
-
-      if (
-        now.getHours() === parseInt(hours, 10) &&
-        now.getMinutes() === parseInt(minutes, 10)
-      ) {
-        alert("Your daily quote is ready 🔥");
-      }
-    }, 60000);
-
-    return () => clearInterval(interval);
-  }, [reminderEnabled, reminderTime]);
 
   useEffect(() => {
     if (!USE_SUPABASE || !supabase) return;
@@ -968,34 +832,12 @@ function App() {
           </div>
 
           <div style={styles.sectionCard}>
-            <div style={styles.sectionHeader}>Daily Reminder</div>
-
-            <div style={styles.settingsRow}>
-              <input
-                type="checkbox"
-                checked={reminderEnabled}
-                onChange={(e) => setReminderEnabled(e.target.checked)}
-              />
-              <span style={styles.resultsText}>Enable daily reminder</span>
-            </div>
-
-            {reminderEnabled && (
-              <input
-                type="time"
-                value={reminderTime}
-                onChange={(e) => setReminderTime(e.target.value)}
-                style={{ ...styles.input, marginTop: "10px" }}
-              />
-            )}
-          </div>
-
-          <div style={styles.sectionCard}>
             <div style={styles.sectionHeader}>Push Notifications</div>
 
             <div style={styles.resultsText}>
               {pushEnabled
-                ? "Push notifications are enabled."
-                : "Enable a real daily notification."}
+                ? "Push notifications are enabled and should still work after the app is closed."
+                : "Enable real push notifications. These are better than in-app alerts because they can still work after the app is closed."}
             </div>
 
             {!pushEnabled && (
@@ -1207,7 +1049,7 @@ function App() {
         <div style={styles.sectionCard}>
           <div style={styles.sectionHeader}>Notes</div>
           <div style={styles.mutedText}>
-            Favorites and likes now strongly influence which quotes are shown first.
+            This app now relies on real push notifications instead of in-page alert reminders.
           </div>
         </div>
       </>
@@ -1427,11 +1269,6 @@ const styles = {
     fontWeight: 800,
     color: "#0f172a",
     marginBottom: "14px",
-  },
-  settingsRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
   },
   profileSection: {
     marginBottom: "14px",
