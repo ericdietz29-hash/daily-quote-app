@@ -10,6 +10,7 @@ import {
   Home,
   BookOpen,
   Bookmark,
+  Shield,
 } from "lucide-react";
 import { supabase } from "./supabase";
 
@@ -36,6 +37,105 @@ const FALLBACK_QUOTES = [
     author: "Michael Jordan",
     category: "Athletics",
     tags: ["failure", "perseverance", "excellence"],
+  },
+
+  {
+    id: 1001,
+    text: "Once you've wrestled, everything else in life is easy.",
+    author: "Dan Gable",
+    category: "Wrestling",
+    tags: ["toughness", "discipline", "grit"],
+  },
+  {
+    id: 1002,
+    text: "Discipline equals freedom.",
+    author: "Jocko Willink",
+    category: "Discipline",
+    tags: ["discipline", "freedom", "ownership"],
+  },
+  {
+    id: 1003,
+    text: "Grit is passion and perseverance for long-term goals.",
+    author: "Angela Duckworth",
+    category: "Psychology",
+    tags: ["grit", "perseverance", "long-term"],
+  },
+  {
+    id: 1004,
+    text: "Every man's happiness depends from himself.",
+    author: "Marcus Aurelius",
+    category: "Stoicism",
+    tags: ["mindset", "self-mastery", "stoicism"],
+  },
+  {
+    id: 1005,
+    text: "Make the best use of what is in your power, and take the rest as it happens.",
+    author: "Epictetus",
+    category: "Stoicism",
+    tags: ["control", "acceptance", "stoicism"],
+  },
+  {
+    id: 1006,
+    text: "Whether you think you can, or you think you can't—you're right.",
+    author: "Henry Ford",
+    category: "Industry",
+    tags: ["mindset", "belief", "confidence"],
+  },
+  {
+    id: 1007,
+    text: "Have not I commanded thee? Be strong and of a good courage; be not afraid.",
+    author: "Joshua 1:9",
+    category: "Bible",
+    tags: ["courage", "faith", "strength"],
+  },
+  {
+    id: 1008,
+    text: "I can do all things through Christ which strengtheneth me.",
+    author: "Philippians 4:13",
+    category: "Bible",
+    tags: ["faith", "strength", "endurance"],
+  },
+  {
+    id: 1009,
+    text: "And patience, experience; and experience, hope.",
+    author: "Romans 5:4",
+    category: "Bible",
+    tags: ["patience", "hope", "character"],
+  },
+  {
+    id: 1010,
+    text: "For a just man falleth seven times, and riseth up again.",
+    author: "Proverbs 24:16",
+    category: "Bible",
+    tags: ["resilience", "faith", "perseverance"],
+  },
+  {
+    id: 1011,
+    text: "Dwell on the beauty of life.",
+    author: "Marcus Aurelius",
+    category: "Stoicism",
+    tags: ["gratitude", "presence", "stoicism"],
+  },
+  {
+    id: 1012,
+    text: "No man is free who is not master of himself.",
+    author: "Epictetus",
+    category: "Stoicism",
+    tags: ["self-control", "freedom", "discipline"],
+  },
+  {
+    id: 1013,
+    text: "Obstacles are those frightful things you see when you take your eyes off your goal.",
+    author: "Henry Ford",
+    category: "Industry",
+    tags: ["focus", "goals", "mindset"],
+  },
+  {
+    id: 1014,
+    text: "Good.",
+    author: "Jocko Willink",
+    category: "Discipline",
+    tags: ["ownership", "resilience", "mindset"],
   },
 ];
 
@@ -83,22 +183,50 @@ function normalizeQuote(quote) {
   };
 }
 
-function scoreQuote(quote, preferences, reactions, history) {
+function getFavoriteSignalMap(activeQuotes, favorites) {
+  const signal = {
+    authors: {},
+    categories: {},
+    tags: {},
+  };
+
+  const favoriteQuotes = activeQuotes.filter((quote) => favorites.includes(quote.id));
+
+  favoriteQuotes.forEach((quote) => {
+    signal.authors[quote.author] = (signal.authors[quote.author] || 0) + 1;
+    signal.categories[quote.category] = (signal.categories[quote.category] || 0) + 1;
+
+    const tags = Array.isArray(quote.tags) ? quote.tags : [];
+    tags.forEach((tag) => {
+      signal.tags[tag] = (signal.tags[tag] || 0) + 1;
+    });
+  });
+
+  return signal;
+}
+
+function scoreQuote(quote, preferences, reactions, history, favoriteSignals) {
   let score = 0;
   const tags = Array.isArray(quote.tags) ? quote.tags : [];
 
-  score += (preferences.categories?.[quote.category] || 0) * 3;
-  score += (reactions.likesByCategory?.[quote.category] || 0) * 2;
-  score -= (reactions.dislikesByCategory?.[quote.category] || 0) * 3;
+  score += (preferences.categories?.[quote.category] || 0) * 4;
+  score += (reactions.likesByCategory?.[quote.category] || 0) * 4;
+  score -= (reactions.dislikesByCategory?.[quote.category] || 0) * 5;
+
+  score += (preferences.tags?.[tags[0]] || 0) * 0; // harmless placeholder removed by loop below
 
   tags.forEach((tag) => {
-    score += (preferences.tags?.[tag] || 0) * 2;
-    score += (reactions.likesByTag?.[tag] || 0) * 1.5;
-    score -= (reactions.dislikesByTag?.[tag] || 0) * 2;
+    score += (preferences.tags?.[tag] || 0) * 3;
+    score += (reactions.likesByTag?.[tag] || 0) * 3;
+    score -= (reactions.dislikesByTag?.[tag] || 0) * 4;
+    score += (favoriteSignals.tags?.[tag] || 0) * 5;
   });
 
-  score += (reactions.likesByAuthor?.[quote.author] || 0) * 2;
-  score -= (reactions.dislikesByAuthor?.[quote.author] || 0) * 2.5;
+  score += (reactions.likesByAuthor?.[quote.author] || 0) * 4;
+  score -= (reactions.dislikesByAuthor?.[quote.author] || 0) * 5;
+
+  score += (favoriteSignals.authors?.[quote.author] || 0) * 6;
+  score += (favoriteSignals.categories?.[quote.category] || 0) * 6;
 
   const last10 = history.slice(-10);
   if (last10.includes(quote.id)) score -= 25;
@@ -112,6 +240,7 @@ function pickDailyQuote(
   reactions,
   history,
   todayKey,
+  favoriteSignals,
   filters = {}
 ) {
   const seed = dateSeed(todayKey);
@@ -142,7 +271,13 @@ function pickDailyQuote(
 
   const scored = pool.map((quote) => ({
     ...quote,
-    adaptiveScore: scoreQuote(quote, preferences, reactions, history),
+    adaptiveScore: scoreQuote(
+      quote,
+      preferences,
+      reactions,
+      history,
+      favoriteSignals
+    ),
   }));
 
   scored.sort((a, b) => {
@@ -187,15 +322,19 @@ function App() {
   const [pushEnabled, setPushEnabled] = useState(false);
 
   const [adminQuoteText, setAdminQuoteText] = useState("");
-const [adminQuoteAuthor, setAdminQuoteAuthor] = useState("");
-const [adminQuoteCategory, setAdminQuoteCategory] = useState("General");
-const [adminPassword, setAdminPassword] = useState("");
+  const [adminQuoteAuthor, setAdminQuoteAuthor] = useState("");
+  const [adminQuoteCategory, setAdminQuoteCategory] = useState("General");
+  const [adminPassword, setAdminPassword] = useState("");
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminMessage, setAdminMessage] = useState("");
 
   const activeQuotes = useMemo(() => {
     return quotes.length ? quotes : FALLBACK_QUOTES;
   }, [quotes]);
+
+  const favoriteSignals = useMemo(() => {
+    return getFavoriteSignalMap(activeQuotes, favorites);
+  }, [activeQuotes, favorites]);
 
   const categories = useMemo(
     () => ["All", ...Array.from(new Set(activeQuotes.map((q) => q.category))).sort()],
@@ -283,7 +422,8 @@ const [adminPassword, setAdminPassword] = useState("");
         preferences,
         reactions,
         history,
-        liveTodayKey
+        liveTodayKey,
+        favoriteSignals
       );
       setCurrentQuoteId(nextQuote.id);
       localStorage.setItem(STORAGE_KEYS.lastQuoteDate, liveTodayKey);
@@ -296,6 +436,7 @@ const [adminPassword, setAdminPassword] = useState("");
     history,
     preferences,
     reactions,
+    favoriteSignals,
     quoteInitialized,
     quotesLoading,
   ]);
@@ -366,6 +507,22 @@ const [adminPassword, setAdminPassword] = useState("");
   const currentQuote = useMemo(() => {
     return activeQuotes.find((quote) => quote.id === currentQuoteId) || activeQuotes[0];
   }, [activeQuotes, currentQuoteId]);
+
+  const recommendedQuotes = useMemo(() => {
+    return [...activeQuotes]
+      .map((quote) => ({
+        ...quote,
+        adaptiveScore: scoreQuote(
+          quote,
+          preferences,
+          reactions,
+          history,
+          favoriteSignals
+        ),
+      }))
+      .sort((a, b) => b.adaptiveScore - a.adaptiveScore)
+      .slice(0, 8);
+  }, [activeQuotes, preferences, reactions, history, favoriteSignals]);
 
   const filteredQuotes = useMemo(() => {
     return activeQuotes.filter((quote) => {
@@ -488,6 +645,7 @@ const [adminPassword, setAdminPassword] = useState("");
       reactions,
       [...history, currentQuote.id],
       `${todayKey}-alt-${Date.now()}`,
+      favoriteSignals,
       {
         category: categoryFilter,
         author: authorFilter,
@@ -513,6 +671,7 @@ const [adminPassword, setAdminPassword] = useState("");
       reactions,
       [...history, currentQuote.id],
       `${todayKey}-${Date.now()}`,
+      favoriteSignals,
       {
         category: categoryFilter,
         author: authorFilter,
@@ -637,6 +796,11 @@ const [adminPassword, setAdminPassword] = useState("");
       return;
     }
 
+    if (!adminQuoteCategory.trim()) {
+      setAdminMessage("Please enter a category.");
+      return;
+    }
+
     if (!adminPassword.trim()) {
       setAdminMessage("Please enter the admin password.");
       return;
@@ -651,11 +815,11 @@ const [adminPassword, setAdminPassword] = useState("");
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-  text: adminQuoteText,
-  author: adminQuoteAuthor,
-  category: adminQuoteCategory,
-  adminPassword,
-}),
+          text: adminQuoteText,
+          author: adminQuoteAuthor,
+          category: adminQuoteCategory,
+          adminPassword,
+        }),
       });
 
       const result = await response.json();
@@ -669,18 +833,15 @@ const [adminPassword, setAdminPassword] = useState("");
 
       if (addedQuote?.id) {
         setQuotes((prev) => [...prev, addedQuote]);
+        setCurrentQuoteId(addedQuote.id);
+        localStorage.setItem(STORAGE_KEYS.currentQuoteId, String(addedQuote.id));
       }
 
-      setCurrentQuoteId(addedQuote?.id || currentQuoteId);
-      localStorage.setItem(
-        STORAGE_KEYS.currentQuoteId,
-        String(addedQuote?.id || currentQuoteId || "")
-      );
-
       setAdminQuoteText("");
-setAdminQuoteAuthor("");
-setAdminQuoteCategory("General");
-setAdminMessage("Quote added successfully.");
+      setAdminQuoteAuthor("");
+      setAdminQuoteCategory("General");
+      setAdminPassword("");
+      setAdminMessage("Quote added successfully.");
     } catch (error) {
       console.error("Add quote error:", error);
       setAdminMessage("Something went wrong while adding the quote.");
@@ -876,7 +1037,7 @@ setAdminMessage("Quote added successfully.");
                   ))
                 ) : (
                   <span style={styles.mutedText}>
-                    Likes and dislikes will shape future recommendations.
+                    Likes, favorites, and dislikes shape future recommendations.
                   </span>
                 )}
               </div>
@@ -895,7 +1056,20 @@ setAdminMessage("Quote added successfully.");
       return (
         <>
           <div style={styles.sectionCard}>
-            <div style={styles.sectionHeader}>Browse quotes</div>
+            <div style={styles.sectionHeader}>Recommended for you</div>
+            <div style={styles.resultsText}>
+              These are the quotes most similar to what you like and favorite.
+            </div>
+          </div>
+
+          <div style={styles.listStack}>
+            {recommendedQuotes.map((quote) => (
+              <QuoteCard key={`recommended-${quote.id}`} quote={quote} />
+            ))}
+          </div>
+
+          <div style={styles.sectionCard}>
+            <div style={styles.sectionHeader}>Browse all quotes</div>
 
             <div style={styles.filtersStack}>
               <select
@@ -977,26 +1151,32 @@ setAdminMessage("Quote added successfully.");
       <>
         <div style={styles.sectionCard}>
           <div style={styles.sectionHeader}>Admin Quote Entry</div>
-          <div style={styles.resultsText}>
-            Add a new quote directly to Supabase.
-          </div>
+          <div style={styles.resultsText}>Add a new quote directly to Supabase.</div>
 
-          <div style={{ marginTop: "14px", display: "grid", gap: "12px" }}>
+          <div style={styles.adminStack}>
             <textarea
               value={adminQuoteText}
               onChange={(e) => setAdminQuoteText(e.target.value)}
               placeholder="Enter quote text"
-              style={styles.textarea}
               rows={5}
+              style={styles.textarea}
             />
 
             <input
-  type="text"
-  value={adminQuoteCategory}
-  onChange={(e) => setAdminQuoteCategory(e.target.value)}
-  placeholder="Enter category"
-  style={styles.input}
-/>
+              type="text"
+              value={adminQuoteAuthor}
+              onChange={(e) => setAdminQuoteAuthor(e.target.value)}
+              placeholder="Enter author name"
+              style={styles.input}
+            />
+
+            <input
+              type="text"
+              value={adminQuoteCategory}
+              onChange={(e) => setAdminQuoteCategory(e.target.value)}
+              placeholder="Enter category"
+              style={styles.input}
+            />
 
             <input
               type="password"
@@ -1025,10 +1205,9 @@ setAdminMessage("Quote added successfully.");
         </div>
 
         <div style={styles.sectionCard}>
-          <div style={styles.sectionHeader}>How this works</div>
+          <div style={styles.sectionHeader}>Notes</div>
           <div style={styles.mutedText}>
-            The app sends the quote to your secure <code>/api/add-quote</code> route.
-            That route should save the quote into Supabase using your server-side key.
+            Favorites and likes now strongly influence which quotes are shown first.
           </div>
         </div>
       </>
@@ -1076,7 +1255,7 @@ setAdminMessage("Quote added successfully.");
             onClick={() => setActiveTab("admin")}
             style={activeTab === "admin" ? styles.navButtonActive : styles.navButton}
           >
-            <Sparkles size={18} />
+            <Shield size={18} />
             <span>Admin</span>
           </button>
         </div>
@@ -1295,6 +1474,11 @@ const styles = {
   filtersStack: {
     display: "grid",
     gap: "10px",
+  },
+  adminStack: {
+    marginTop: "14px",
+    display: "grid",
+    gap: "12px",
   },
   input: {
     width: "100%",
