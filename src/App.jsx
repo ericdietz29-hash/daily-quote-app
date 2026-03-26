@@ -169,7 +169,15 @@ function pickDailyQuote(
 
   if (!pool.length) return quotes[0];
 
-  const scored = pool.map((quote) => ({
+  const recentIds = history.slice(-30);
+
+  let unseenPool = pool.filter((quote) => !recentIds.includes(quote.id));
+
+  if (!unseenPool.length) {
+    unseenPool = [...pool];
+  }
+
+  const scored = unseenPool.map((quote) => ({
     ...quote,
     adaptiveScore: scoreQuote(
       quote,
@@ -184,13 +192,18 @@ function pickDailyQuote(
     if (b.adaptiveScore !== a.adaptiveScore) {
       return b.adaptiveScore - a.adaptiveScore;
     }
-    return ((a.id * 9301 + seed) % 233280) - ((b.id * 9301 + seed) % 233280);
+    return a.id - b.id;
   });
 
-  const recentIds = history.slice(-7);
-  const unseenPreferred = scored.filter((quote) => !recentIds.includes(quote.id));
+  // Take a larger top pool so the app rotates more
+  const topPool = scored.slice(0, Math.min(40, scored.length));
 
-  return unseenPreferred[0] || scored[0] || quotes[0];
+  if (!topPool.length) {
+    return scored[0] || quotes[0];
+  }
+
+  const index = seed % topPool.length;
+  return topPool[index];
 }
 
 function App() {
@@ -279,7 +292,8 @@ function App() {
         if (error) throw error;
 
         const normalized = (data || []).map((quote) => normalizeQuote(quote));
-        setQuotes(normalized);
+console.log("Loaded quotes from Supabase:", normalized.length);
+setQuotes(normalized);
       } catch (error) {
         console.error("Failed to load quotes:", error);
         setQuotes([]);
@@ -302,20 +316,26 @@ function App() {
     setTodayKey(liveTodayKey);
 
     if (savedDate === liveTodayKey && hasSavedQuote) {
-      setCurrentQuoteId(savedQuoteId);
-    } else {
-      const nextQuote = pickDailyQuote(
-        activeQuotes,
-        preferences,
-        reactions,
-        history,
-        liveTodayKey,
-        favoriteSignals
-      );
-      setCurrentQuoteId(nextQuote.id);
-      localStorage.setItem(STORAGE_KEYS.lastQuoteDate, liveTodayKey);
-      localStorage.setItem(STORAGE_KEYS.currentQuoteId, String(nextQuote.id));
-    }
+  setCurrentQuoteId(savedQuoteId);
+} else {
+  const nextQuote = pickDailyQuote(
+    activeQuotes,
+    preferences,
+    reactions,
+    history,
+    liveTodayKey,
+    favoriteSignals
+  );
+
+  setCurrentQuoteId(nextQuote.id);
+  localStorage.setItem(STORAGE_KEYS.lastQuoteDate, liveTodayKey);
+  localStorage.setItem(STORAGE_KEYS.currentQuoteId, String(nextQuote.id));
+
+  setHistory((prev) => {
+    if (prev.includes(nextQuote.id)) return prev;
+    return [...prev, nextQuote.id];
+  });
+}
 
     setQuoteInitialized(true);
   }, [
